@@ -52,7 +52,7 @@ class Parser {
     this.options = _.defaults(opts, {
       entry: './schema/signalk.json',
       output: './build',
-      debug: false,
+      debug: true,
       cwd: process.cwd(),
       encoding: 'utf-8',
       done: () => {}
@@ -137,6 +137,8 @@ class Parser {
           }
         }
 
+        const skipFields = ['timestamp', '$source', '_attr', 'meta', 'pgn', 'sentence', 'value', 'values']
+        const embeddedFields = subtree.embedded ? _.omit(subtree.embedded.properties || {}, skipFields) : {}
         const documentation = {
           node: node,
           path: path,
@@ -147,7 +149,8 @@ class Parser {
           type: typeof subtree.type !== 'undefined' ? subtree.type : null,
           description: typeof subtree.description !== 'undefined' ? subtree.description : null,
           example: typeof subtree.example !== 'undefined' ? subtree.example : null,
-          json: JSON.stringify(subtree, null, 2)
+          json: JSON.stringify(subtree, null, 2),
+          embeddedFields: Object.keys(embeddedFields).length > 0 ? embeddedFields : undefined
         }
         if (subtree.enum) {
           documentation.enum = subtree.enum
@@ -253,6 +256,18 @@ class Parser {
         if (doc.enum) {
           md += '**Enum values:**\n'
           doc.enum.forEach(enumValue => md += `* ${enumValue}\n`)
+        }
+
+        if (doc.embeddedFields) {
+          md += '**Fields:**\n\n'
+          Object.keys(doc.embeddedFields).forEach(key => {
+            const field = doc.embeddedFields[key]
+            const descString = field.description ? ` (${field.description})` : ''
+            const unitString = field.units ? `, units: ${field.units} (${units[field.units]})` : ''
+            const enumString = field.enum ? `, enum:\n\n${field.enum.map(x => ` * ${x}\n`).join('')}` : ''
+            md += `* ${key}${descString}${unitString}${enumString}\n`
+          })
+          md += '\n'
         }
 
         md += '---\n\n'
@@ -371,9 +386,11 @@ class Parser {
           _.defaults(this.tree[`${prefix}/${key}`], this.resolveReference(data.properties[key]['$ref']))
         }
 
-        // if (typeof this.tree[`${prefix}/${key}`] !== 'undefined' && typeof this.tree[`${prefix}/${key}`].allOf !== 'undefined') {
-        //   this.parseAllOf(`${prefix}/${key}`, this.tree[`${prefix}/${key}`].allOf)
-        // }
+        if (typeof this.tree[`${prefix}/${key}`] !== 'undefined' && typeof this.tree[`${prefix}/${key}`].allOf !== 'undefined') {
+          this.tree[`${prefix}/${key}`]['embedded'] = this.reduceParsedAllOf(
+            this.createAllOfArray(this.tree[`${prefix}/${key}`].allOf, this.tree[`${prefix}/${key}`])
+          )
+        }
 
         if (this.hasProperties(this.tree[`${prefix}/${key}`])) {
           this.parseProperties(`${prefix}/${key}`, this.tree[`${prefix}/${key}`])
@@ -390,8 +407,8 @@ class Parser {
         }
 
         if (typeof this.tree[`${prefix}/${key}`] !== 'undefined' && typeof this.tree[`${prefix}/${key}`].allOf !== 'undefined') {
-          this.parseAllOf(`${prefix}/${key}`, this.tree[`${prefix}/${key}`].allOf, 
-            _.omit(this.tree[`${prefix}/${key}`], ['properties', 'allOf', 'patternProperties', '$key']))
+          this.parseAllOf(`${prefix}/${key}`, this.tree[`${prefix}/${key}`].allOf,
+            this.tree[`${prefix}/${key}`])
         }
 
         if (this.hasProperties(this.tree[`${prefix}/${key}`])) {
@@ -418,7 +435,20 @@ class Parser {
 
     let readablePrefix = `${treePrefix.split('/')[treePrefix.split('/').length - 2]}/${treePrefix.split('/')[treePrefix.split('/').length - 1]}`
 
-    let temp = [baseObject].concat(allOf).map(obj => {
+    let temp = this.createAllOfArray(allOf, baseObject)
+
+    if (treePrefix.indexOf("/navigation/position") > 0) {
+      debugger
+    }
+    this.tree[treePrefix] = this.reduceParsedAllOf(temp)
+  }
+
+  createAllOfArray (allOf, baseObject) {
+    if (!Array.isArray(allOf)) {
+      return {}
+    }
+
+    const result = [baseObject].concat(allOf).map(obj => {
       if (typeof obj === 'object' && obj !== null && typeof obj['$ref'] !== 'undefined') {
         const ref = this.resolveReference(obj['$ref'])
 
@@ -437,12 +467,7 @@ class Parser {
       }
       return true
     })
-
-    if (!Array.isArray(temp)) {
-      return
-    }
-
-    this.tree[treePrefix] = this.reduceParsedAllOf(temp)
+    return result
   }
 
   reduceParsedAllOf (allOf, result) {
