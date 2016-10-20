@@ -22,6 +22,7 @@ const fs = require('mz/fs')
 const path = require('path')
 const rimraf = require('rimraf')
 const markdown = new (require('markdown-it'))()
+const RefParser = require('json-schema-ref-parser')
 
 
 const units = {
@@ -74,7 +75,7 @@ class Parser {
     .then(() => fs.mkdir(this.options.output)) // create a new build directory
     .then(() => fs.mkdir(path.join(this.options.output, 'html')))
     .then(() => {
-      return this.getFile(this.options.entry, '/')
+      return RefParser.dereference(this.options.entry)
     })
 
     /*
@@ -110,8 +111,9 @@ class Parser {
         return result
       }
 
+      const safeTree = _.cloneDeep(this.tree)
       return fs
-      .writeFile(path.join(this.options.output, 'tree.json'), JSON.stringify(this.tree, null, 2), this.options.encoding)
+      .writeFile(path.join(this.options.output, 'tree.json'), this.tree, this.options.encoding)
       .then(() => {
         this.debug(`Written total tree to ${path.join(this.options.output, 'tree.json')}`)
         return result
@@ -149,7 +151,7 @@ class Parser {
           type: typeof subtree.type !== 'undefined' ? subtree.type : null,
           description: typeof subtree.description !== 'undefined' ? subtree.description : null,
           example: typeof subtree.example !== 'undefined' ? subtree.example : null,
-          json: JSON.stringify(subtree, null, 2),
+          json: subtree,
           embeddedFields: Object.keys(embeddedFields).length > 0 ? embeddedFields : undefined
         }
         if (subtree.enum) {
@@ -234,12 +236,7 @@ class Parser {
           return
         }
 
-        let json = null
-        try {
-          json = JSON.parse(doc.json)
-        } catch (e) {
-          this.debug(`Error parsing JSON for path ${path}: ${e.message}`)
-        }
+        let json = doc.json
 
         // md += `### [${path.replace(/</g, '&lt;').replace(/>/g, '&gt;')}](http://signalk.org/specification/master/keys/html/${fn.replace('.md', '.html')})\n\n`
         md += `#### ${path.replace(/</g, '&lt;').replace(/>/g, '&gt;')}\n\n`
@@ -378,16 +375,15 @@ class Parser {
     if (prefix.charAt(prefix.length - 1) === '/') {
       prefix = prefix.replace(/\/+$/, '')
     }
+    const splitPrefix = prefix.split("/")
+    if (splitPrefix.length > 1 && splitPrefix[splitPrefix.length - 2] === splitPrefix[splitPrefix.length - 1]) {
+      console.error("Avoiding self recursion at", prefix)
+      return
+    }
 
     if (typeof data.properties === 'object' && data.properties !== null) {
       Object.keys(data.properties).forEach(key => {
-        if (typeof data.properties[key]['$ref'] === 'undefined') {
-          this.tree[`${prefix}/${key}`] = data.properties[key]
-        } else {
-          this.tree[`${prefix}/${key}`] = {}
-          _.assign(this.tree[`${prefix}/${key}`], _.omit(data.properties[key], '$ref'))
-          _.defaults(this.tree[`${prefix}/${key}`], this.resolveReference(data.properties[key]['$ref']))
-        }
+        this.tree[`${prefix}/${key}`] = data.properties[key]
 
         if (typeof this.tree[`${prefix}/${key}`] !== 'undefined' && typeof this.tree[`${prefix}/${key}`].allOf !== 'undefined') {
           this.parseAllOf(`${prefix}/${key}`, this.tree[`${prefix}/${key}`].allOf, this.tree[`${prefix}/${key}`] || {})
@@ -404,11 +400,7 @@ class Parser {
 
     if (typeof data.patternProperties === 'object' && data.patternProperties !== null) {
       Object.keys(data.patternProperties).forEach(key => {
-        if (typeof data.patternProperties[key]['$ref'] === 'undefined') {
-          this.tree[`${prefix}/${key}`] = data.patternProperties[key]
-        } else {
-          this.tree[`${prefix}/${key}`] = this.resolveReference(data.patternProperties[key]['$ref'])
-        }
+        this.tree[`${prefix}/${key}`] = data.patternProperties[key]
 
         if (typeof this.tree[`${prefix}/${key}`] !== 'undefined' && typeof this.tree[`${prefix}/${key}`].allOf !== 'undefined') {
           this.parseAllOf(`${prefix}/${key}`, this.tree[`${prefix}/${key}`].allOf,
@@ -419,14 +411,6 @@ class Parser {
           this.parseProperties(`${prefix}/${key}`, this.tree[`${prefix}/${key}`])
         }
       })
-    }
-
-    if (typeof data['$ref'] !== 'undefined') {
-      this.tree[prefix] = this.resolveReference(data['$ref'])
-
-      if (typeof this.tree[prefix].properties !== 'undefined' || typeof this.tree[prefix].properties !== 'undefined') {
-        this.parseProperties(prefix, this.tree[prefix])
-      }
     }
 
     return data
@@ -441,9 +425,6 @@ class Parser {
 
     let temp = this.createAllOfArray(allOf, baseObject)
 
-    if (treePrefix.indexOf("/navigation/position") > 0) {
-      debugger
-    }
     this.tree[treePrefix] = this.reduceParsedAllOf(temp)
   }
 
@@ -452,19 +433,7 @@ class Parser {
       return {}
     }
 
-    const result = [baseObject].concat(allOf).map(obj => {
-      if (typeof obj === 'object' && obj !== null && typeof obj['$ref'] !== 'undefined') {
-        const ref = this.resolveReference(obj['$ref'])
-
-        if (ref !== null && typeof ref !== 'undefined') {
-          return ref
-        } else {
-          console.log(`*** Warning: couldn't resolve ${obj['$ref']} in ${readablePrefix}. No file in $ref value?`)
-        }
-      }
-
-      return obj
-    })
+    const result = [baseObject].concat(allOf)
     .filter(obj => {
       if (obj === null || typeof obj === 'undefined') {
         return false
@@ -485,9 +454,11 @@ class Parser {
       }
 
       Object.keys(obj).forEach(key => {
-        if (key !== 'properties' && key !== 'patternProperties' && key !== 'allOf' && key !== '$ref') {
+        if (key !== 'properties' && key !== 'patternProperties' && key !== 'allOf') {
           if (!result[key]) {
             result[key] = obj[key]
+          } else if (result[key] !== obj[key]) {
+            console.log("avoiding overriding ", key, ". prev", result[key], ", rejected", obj[key])
           }
         }
 
@@ -517,70 +488,6 @@ class Parser {
       })
     })
 
-    return result
-  }
-
-  resolveReference (refObject) {
-    const origRef = refObject.refString
-    if (typeof origRef !== 'string') {
-      return null
-    }
-
-    const ref = origRef.split('#')
-    let file = ref[0].trim()
-    let keyPath = ref[1].trim()
-
-
-    if (file.length === 0) {
-      file = refObject.refFile
-    }
-
-    if (keyPath.length === 0) {
-      if (path.basename(refObject.refFile) === file) {
-        console.error("Avoiding full file self recursion to stop forever loop", refObject.refFile, "->", file)
-        return {}
-      }
-      return this.getFile(file, refObject.refFile)
-    }
-
-    if (keyPath.charAt(0) === '/') {
-      keyPath = keyPath.replace(/^\//, '')
-    }
-
-    keyPath = keyPath.split('/')
-
-    let cursor = this.getFile(file, refObject.refFile)
-    const result = _.get(cursor, keyPath, "NOT_DEFINED")
-    if (result === "NOT_DEFINED") {
-      console.error("Failed to resolve reference!", JSON.stringify(refObject))
-    }
-    return result
-  }
-
-  getFile (filename, fromFilename) {
-    let filePath = filename
-    if (!fs.existsSync(filePath)) {
-      let directory = path.dirname(fromFilename ? fromFilename : this.options.entry)
-      filePath = path.join(directory, filename)
-    }
-    if (this.fileCache[filePath]) {
-      return this.fileCache[filePath]
-    }
-    let content = fs.readFileSync(filePath, {encoding: this.options.encoding})
-    if (!content) {
-      console.error("Failed to read", filename)
-    }
-
-    function decorateWithFilename(value, index) {
-      if (index == "$ref") {
-        return {
-          refString: value,
-          refFile: filePath
-        }
-      }
-    }
-    const result = _.cloneDeep(JSON.parse(content), decorateWithFilename)
-    this.fileCache[filePath] = result
     return result
   }
 
