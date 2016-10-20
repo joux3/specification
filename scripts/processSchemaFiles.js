@@ -137,8 +137,8 @@ class Parser {
           }
         }
 
-        const skipFields = ['timestamp', '$source', '_attr', 'meta', 'pgn', 'sentence', 'value', 'values']
-        const embeddedFields = subtree.embedded ? _.omit(subtree.embedded.properties || {}, skipFields) : {}
+        const skipFields = ['timestamp', '$source', 'source', '_attr', 'meta', 'pgn', 'sentence', 'value', 'values']
+        const embeddedFields = subtree.properties ? _.omit(subtree.properties || {}, skipFields) : {}
         const documentation = {
           node: node,
           path: path,
@@ -217,21 +217,24 @@ class Parser {
 
       Object.keys(filenames).forEach(fn => {
         let valid = true
-        let json = null
-
         filter.forEach(f => {
           if (filenames[fn].indexOf(f) !== -1) {
             valid = false
           }
         })
-
-        if (valid === false) {
+        if (!valid) {
           return
         }
 
         const path = filenames[fn]
         const doc = this.docs[path]
 
+        // this tree path out unless it's a leaf. leafs are detected by checking if they can contain a timestamp
+        if (!this.docs[path + '/timestamp']) {
+          return
+        }
+
+        let json = null
         try {
           json = JSON.parse(doc.json)
         } catch (e) {
@@ -387,9 +390,10 @@ class Parser {
         }
 
         if (typeof this.tree[`${prefix}/${key}`] !== 'undefined' && typeof this.tree[`${prefix}/${key}`].allOf !== 'undefined') {
-          this.tree[`${prefix}/${key}`]['embedded'] = this.reduceParsedAllOf(
+          this.parseAllOf(`${prefix}/${key}`, this.tree[`${prefix}/${key}`].allOf, this.tree[`${prefix}/${key}`] || {})
+          /*this.tree[`${prefix}/${key}`]['embedded'] = this.reduceParsedAllOf(
             this.createAllOfArray(this.tree[`${prefix}/${key}`].allOf, this.tree[`${prefix}/${key}`])
-          )
+          )*/
         }
 
         if (this.hasProperties(this.tree[`${prefix}/${key}`])) {
