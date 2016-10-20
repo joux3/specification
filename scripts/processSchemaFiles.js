@@ -140,7 +140,9 @@ class Parser {
         }
 
         const skipFields = ['timestamp', '$source', 'source', '_attr', 'meta', 'pgn', 'sentence', 'value', 'values']
-        const embeddedFields = subtree.properties ? _.omit(subtree.properties || {}, skipFields) : {}
+        const embeddedFields = _.pick(subtree.properties ? _.omit(subtree.properties || {}, skipFields) : {}, (value, key) => {
+          return !this.tree[`${path}/${key}/timestamp`]
+        })
         const documentation = {
           node: node,
           path: path,
