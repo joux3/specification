@@ -111,9 +111,17 @@ class Parser {
         return result
       }
 
-      const safeTree = _.cloneDeep(this.tree)
+      const safeTree = _.pick(this.tree, value => {
+        try {
+          JSON.stringify(value)
+        } catch(e) {
+          return false
+        }
+        return true
+      })
+
       return fs
-      .writeFile(path.join(this.options.output, 'tree.json'), this.tree, this.options.encoding)
+      .writeFile(path.join(this.options.output, 'tree.json'), JSON.stringify(safeTree, null, 2), this.options.encoding)
       .then(() => {
         this.debug(`Written total tree to ${path.join(this.options.output, 'tree.json')}`)
         return result
@@ -379,7 +387,7 @@ class Parser {
     }
     const splitPrefix = prefix.split("/")
     if (splitPrefix.length > 1 && splitPrefix[splitPrefix.length - 2] === splitPrefix[splitPrefix.length - 1]) {
-      console.error("Avoiding self recursion at", prefix)
+      //console.error("Avoiding self recursion at", prefix)
       return
     }
 
@@ -402,11 +410,20 @@ class Parser {
 
     if (typeof data.patternProperties === 'object' && data.patternProperties !== null) {
       Object.keys(data.patternProperties).forEach(key => {
+        const target = `${prefix}/${key}`
+
         this.tree[`${prefix}/${key}`] = data.patternProperties[key]
 
         if (typeof this.tree[`${prefix}/${key}`] !== 'undefined' && typeof this.tree[`${prefix}/${key}`].allOf !== 'undefined') {
+          if (target.indexOf("batteries") > 0) {
+            console.log("parsing special allOf", prefix, data)
+            console.log("allof is", this.tree[`${prefix}/${key}`].allOf)
+          }
           this.parseAllOf(`${prefix}/${key}`, this.tree[`${prefix}/${key}`].allOf,
-            this.tree[`${prefix}/${key}`])
+            this.tree[`${prefix}/${key}`] || {})
+          if (target.indexOf("batteries") > 0) {
+            console.log("---------------------------------------- parsed allOf")
+          }
         }
 
         if (this.hasProperties(this.tree[`${prefix}/${key}`])) {
@@ -446,6 +463,7 @@ class Parser {
   }
 
   reduceParsedAllOf (allOf, result) {
+    console.log("--- reduceParsed")
     if (result === null || typeof result !== 'object') {
       result = {}
     }
@@ -459,6 +477,9 @@ class Parser {
         if (key !== 'properties' && key !== 'patternProperties' && key !== 'allOf') {
           if (!result[key]) {
             result[key] = obj[key]
+            if (result[key].allOf) {
+              console.log("setting", key, "without parsing", result[key].allOf, "!!!")
+            }
           } else if (result[key] !== obj[key]) {
             console.log("avoiding overriding ", key, ". prev", result[key], ", rejected", obj[key])
           }
@@ -470,7 +491,23 @@ class Parser {
           }
 
           Object.keys(obj[key]).forEach(k => {
-            result.properties[k] = obj[key][k]
+            if (typeof obj[key][k].allOf !== 'undefined') {
+              console.log("recursing allOf for", key, ", object", obj[key][k].allOf)
+              console.log("before recurse", obj[key][k])
+              this.reduceParsedAllOf(obj[key][k].allOf, obj[key][k])
+              //delete obj[key][k].allOf
+              console.log("after recurse", obj[key][k])
+            } else {
+              console.log("setting property", k)
+            }
+            const doPrint = !!result.properties[k]
+            if (doPrint) {
+              console.log("merging property", k, result.properties[k], "\nwith\n", obj[key][k])
+            }
+            result.properties[k] = _.merge(result.properties[k] || {}, obj[key][k])
+            if (doPrint) {
+              console.log("after merge", result.properties[k])
+            }
           })
         }
 
@@ -485,11 +522,14 @@ class Parser {
         }
 
         if (key === 'allOf') {
+          console.log("parsing allOf")
           this.reduceParsedAllOf(obj[key], result)
+          //delete obj[key]
         }
       })
     })
 
+    console.log("--- reduceParsed done")
     return result
   }
 
