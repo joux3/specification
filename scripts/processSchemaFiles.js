@@ -264,8 +264,9 @@ class Parser {
         md += '\n\n'
 
         if (doc.enum) {
-          md += '**Enum values:**\n'
+          md += '**Enum values:**\n\n'
           doc.enum.forEach(enumValue => md += `* ${enumValue}\n`)
+          md += '\n'
         }
 
         if (doc.embeddedFields) {
