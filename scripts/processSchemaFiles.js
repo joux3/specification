@@ -416,15 +416,8 @@ class Parser {
         this.tree[`${prefix}/${key}`] = data.patternProperties[key]
 
         if (typeof this.tree[`${prefix}/${key}`] !== 'undefined' && typeof this.tree[`${prefix}/${key}`].allOf !== 'undefined') {
-          if (target.indexOf("batteries") > 0) {
-            console.log("parsing special allOf", prefix, data)
-            console.log("allof is", this.tree[`${prefix}/${key}`].allOf)
-          }
           this.parseAllOf(`${prefix}/${key}`, this.tree[`${prefix}/${key}`].allOf,
             this.tree[`${prefix}/${key}`] || {})
-          if (target.indexOf("batteries") > 0) {
-            console.log("---------------------------------------- parsed allOf")
-          }
         }
 
         if (this.hasProperties(this.tree[`${prefix}/${key}`])) {
@@ -464,7 +457,6 @@ class Parser {
   }
 
   reduceParsedAllOf (allOf, result) {
-    console.log("--- reduceParsed")
     if (result === null || typeof result !== 'object') {
       result = {}
     }
@@ -478,9 +470,6 @@ class Parser {
         if (key !== 'properties' && key !== 'patternProperties' && key !== 'allOf') {
           if (!result[key]) {
             result[key] = obj[key]
-            if (result[key].allOf) {
-              console.log("setting", key, "without parsing", result[key].allOf, "!!!")
-            }
           } else if (result[key] !== obj[key]) {
             console.log("avoiding overriding ", key, ". prev", result[key], ", rejected", obj[key])
           }
@@ -493,22 +482,9 @@ class Parser {
 
           Object.keys(obj[key]).forEach(k => {
             if (typeof obj[key][k].allOf !== 'undefined') {
-              console.log("recursing allOf for", key, ", object", obj[key][k].allOf)
-              console.log("before recurse", obj[key][k])
               this.reduceParsedAllOf(obj[key][k].allOf, obj[key][k])
-              //delete obj[key][k].allOf
-              console.log("after recurse", obj[key][k])
-            } else {
-              console.log("setting property", k)
-            }
-            const doPrint = !!result.properties[k]
-            if (doPrint) {
-              console.log("merging property", k, result.properties[k], "\nwith\n", obj[key][k])
             }
             result.properties[k] = _.merge(result.properties[k] || {}, obj[key][k])
-            if (doPrint) {
-              console.log("after merge", result.properties[k])
-            }
           })
         }
 
@@ -523,14 +499,11 @@ class Parser {
         }
 
         if (key === 'allOf') {
-          console.log("parsing allOf")
           this.reduceParsedAllOf(obj[key], result)
-          //delete obj[key]
         }
       })
     })
 
-    console.log("--- reduceParsed done")
     return result
   }
 
