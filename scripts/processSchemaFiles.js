@@ -245,9 +245,17 @@ class Parser {
         const doc = this.docs[path]
 
         function isEmbedded(path) {
-          const parts = path.split('/')
-          const parent = parts.slice(0, parts.length - 1).join('/')
-          return !this.docs[`${path}/timestamp`] && !!this.docs[`${parent}/timestamp`]
+          if (this.docs[`${path}/timestamp`]) {
+            return false
+          }
+          const parts = path.split('/').filter(x => x.length > 0)
+          let soFar = ""
+          let result = false
+          parts.forEach(part => {
+            soFar = soFar + "/" + part
+            result = result || !!this.docs[soFar + '/timestamp']
+          })
+          return result
         }
 
         if (isEmbedded.bind(this)(path)) {
