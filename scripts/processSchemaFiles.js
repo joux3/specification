@@ -154,10 +154,6 @@ class Parser {
               return !this.tree[`${path}/${key}/timestamp`]
             })
 
-        _.forEach(embeddedFields, (value, key) => {
-          this.tree[`${path}/${key}`].isEmbedded = true
-        })
-
         const documentation = {
           node: node,
           path: path,
@@ -248,7 +244,13 @@ class Parser {
         const path = filenames[fn]
         const doc = this.docs[path]
 
-        if (this.docs[path].json.isEmbedded) {
+        function isEmbedded(path) {
+          const parts = path.split('/')
+          const parent = parts.slice(0, parts.length - 1).join('/')
+          return !this.docs[`${path}/timestamp`] && !!this.docs[`${parent}/timestamp`]
+        }
+
+        if (isEmbedded.bind(this)(path)) {
           console.log("Skipping embedded", path)
           return
         }
