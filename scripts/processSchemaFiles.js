@@ -286,14 +286,23 @@ class Parser {
           md += '\n'
         }
 
+        function renderField(key, field, baseIndent) {
+          const descString = field.description ? ` (${field.description})` : ''
+          const unitString = field.units ? `, units: ${field.units} (${units[field.units]})` : ''
+          const enumString = field.enum ? `, enum:\n\n${field.enum.map(x => `${baseIndent}  * ${x}\n`).join('')}` : ''
+          md += `${baseIndent}* ${key}${descString}${unitString}${enumString}\n`
+          if (field.properties) {
+            md += '\n'
+            const subKeys = Object.keys(field.properties)
+            subKeys.forEach(subKey => renderField(subKey, field.properties[subKey], baseIndent + "  "))
+          }
+        }
+
         if (doc.embeddedFields) {
           md += '**Fields:**\n\n'
           Object.keys(doc.embeddedFields).forEach(key => {
             const field = doc.embeddedFields[key]
-            const descString = field.description ? ` (${field.description})` : ''
-            const unitString = field.units ? `, units: ${field.units} (${units[field.units]})` : ''
-            const enumString = field.enum ? `, enum:\n\n${field.enum.map(x => ` * ${x}\n`).join('')}` : ''
-            md += `* ${key}${descString}${unitString}${enumString}\n`
+            renderField(key, field, "")
           })
           md += '\n'
         }
